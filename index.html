@@ -97,7 +97,7 @@ function renderTraining(){
  card.querySelector(".complete").onclick=()=>{
   if(e.weight===""||e.weight==null){toast("Introduce el peso antes de guardar");return}
   let reps=e.reps.map(x=>String(x).trim());if(reps.some(x=>!x)){toast("Completa las 3 series");return}
-  let st=statusFor(e,reps,e.weight);data.sessions.push({id:e.id,name:e.name,group:e.group,date:new Date().toISOString(),weight:Number(e.weight),reps:[...reps],status:st.txt});
+  let st=statusFor(e,reps,e.weight);let now=new Date();let split=e.group.includes("Espalda")?"PULL":e.group.includes("Pierna")?"LEGS":"PUSH";data.sessions.push({id:e.id,name:e.name,group:e.group,split,date:now.toISOString(),weight:Number(e.weight),reps:[...reps],status:st.txt});
   if(!e.history.length||Number(e.weight)>Math.max(...e.history))e.history.push(Number(e.weight));
   save();renderTraining();toast(st.txt);
  };
@@ -105,17 +105,43 @@ function renderTraining(){
  });root.appendChild(d);
  });
 }
+// Semana 9 comienza el lunes 09/11/2026. Ajusta esta fecha si tu calendario real difiere.
+const TRAINING_WEEK9_START = new Date("2026-11-09T00:00:00");
+function trainingWeek(date){let d=new Date(date);d.setHours(0,0,0,0);let anchor=new Date(TRAINING_WEEK9_START);anchor.setHours(0,0,0,0);return 9+Math.floor((d-anchor)/(7*86400000));}
+function splitOf(s){return s.split||(s.group&&s.group.includes("Espalda")?"PULL":s.group&&s.group.includes("Pierna")?"LEGS":"PUSH")}
 function renderProgress(){
  let root=document.getElementById("progressView");
  let total=data.sessions.length,weekStart=new Date();weekStart.setDate(weekStart.getDate()-6);weekStart.setHours(0,0,0,0);
  let weekly=data.sessions.filter(s=>new Date(s.date)>=weekStart).length;
- root.innerHTML=`<div class="section"><div class="section-title">Resumen <span class="pill good">LIVE</span></div><div class="exercise" style="display:flex;gap:12px"><div style="flex:1"><div class="sub">REGISTROS</div><div class="weight">${total}</div></div><div style="flex:1"><div class="sub">ÚLTIMOS 7 DÍAS</div><div class="weight">${weekly}</div></div></div></div>
- <div class="toolbar"><input id="search" type="text" placeholder="Buscar ejercicio..." style="flex:1;min-width:150px"><button class="btn secondary" id="export">Exportar</button><label class="btn secondary" for="importFile">Importar</label><input id="importFile" type="file" accept="application/json" hidden></div><div id="historyList"></div>`;
- const list=root.querySelector("#historyList");
- let sessions=[...data.sessions].reverse();
- function draw(q=""){list.innerHTML="";let arr=sessions.filter(s=>s.name.toLowerCase().includes(q.toLowerCase()));if(!arr.length){list.innerHTML='<div class="empty">Todavía no hay registros para esta búsqueda.</div>';return}
- arr.forEach(s=>{let e=data.exercises.find(x=>x.id===s.id);let card=document.createElement("div");card.className="progress-item";card.innerHTML=`<div class="row"><strong>${esc(s.name)}</strong><span class="date">${new Date(s.date).toLocaleDateString("es-ES")}</span></div><div class="weight">${fmt(s.weight)} kg</div><div style="margin-top:5px">Series: <b>${esc(repsText(s.reps))}</b></div><div class="status">${esc(s.status)}</div><div class="toolbar"><button class="btn secondary small" data-del="${s.date}">Eliminar registro</button></div>`;card.querySelector("[data-del]").onclick=()=>{if(confirm("¿Eliminar esta sesión?")){data.sessions=data.sessions.filter(x=>x.date!==s.date||x.id!==s.id);save();renderProgress()}};list.appendChild(card)})}
- draw();root.querySelector("#search").oninput=e=>draw(e.target.value);
+ root.innerHTML=`<div class="section"><div class="section-title">Resumen <span class="pill good">LIVE</span></div><div class="exercise" style="display:flex;gap:12px"><div style="flex:1"><div class="sub">REGISTROS</div><div class="weight">${total}</div></div><div style="flex:1"><div class="sub">ÚLTIMOS 7 DÍAS</div><div class="weight">${weekly}</div></div><div style="flex:1"><div class="sub">SEMANA ACTUAL</div><div class="weight">9</div></div></div></div>
+ <div class="toolbar"><input id="search" type="text" placeholder="Buscar ejercicio..." style="flex:1;min-width:150px"><button class="btn secondary" id="export">Exportar</button><label class="btn secondary" for="importFile">Importar</label><input id="importFile" type="file" accept="application/json" hidden></div>
+ <div class="section-title">Historial por semanas</div><div id="weekList"></div>
+ <div class="section-title" style="margin-top:24px">Historial individual por ejercicio</div><div id="historyList"></div>`;
+ const weeksEl=root.querySelector("#weekList"),list=root.querySelector("#historyList");
+ const sessions=[...data.sessions].sort((a,b)=>new Date(b.date)-new Date(a.date));
+ function render(q=""){
+  weeksEl.innerHTML="";list.innerHTML="";
+  const filtered=sessions.filter(s=>s.name.toLowerCase().includes(q.toLowerCase()));
+  if(!filtered.length){weeksEl.innerHTML='<div class="empty">No hay registros para esta búsqueda.</div>';list.innerHTML='';return;}
+  const byWeek={};filtered.forEach(s=>{let w=s.week??trainingWeek(s.date);(byWeek[w] ||= []).push(s)});
+  Object.keys(byWeek).map(Number).sort((a,b)=>b-a).forEach(w=>{
+   let arr=byWeek[w],week=document.createElement("details");week.className="group";week.open=w===9;
+   let dates=[...new Set(arr.map(s=>new Date(s.date).toDateString()))];
+   week.innerHTML=`<summary>📁 Semana ${w}<span class="pill">${dates.length} días · ${arr.length} ejercicios</span></summary><div class="week-sessions"></div>`;
+   let inner=week.querySelector(".week-sessions"), groups={};
+   arr.forEach(s=>{let day=new Date(s.date).toLocaleDateString("es-ES"),type=splitOf(s),key=day+"|"+type;(groups[key] ||= {day,type,items:[]}).items.push(s)});
+   Object.values(groups).sort((a,b)=>new Date(b.items[0].date)-new Date(a.items[0].date)).forEach(g=>{
+    let matching=Object.values(groups).filter(x=>x.type===g.type).sort((a,b)=>new Date(a.items[0].date)-new Date(b.items[0].date));let num=matching.indexOf(g)+1;
+    let sess=document.createElement("details");sess.className="group";sess.style.margin="9px 0 9px 10px";
+    sess.innerHTML=`<summary>📂 Sesión ${num} — ${g.type}<span class="pill">${g.day} · ${g.items.length} ejercicios</span></summary><div class="session-items"></div>`;
+    let si=sess.querySelector(".session-items");g.items.forEach(s=>{let c=document.createElement("div");c.className="progress-item";c.innerHTML=`<div class="row"><strong>${esc(s.name)}</strong><span class="date">${new Date(s.date).toLocaleTimeString("es-ES",{hour:"2-digit",minute:"2-digit"})}</span></div><div class="weight">${fmt(s.weight)} kg</div><div>Series: <b>${esc(repsText(s.reps))}</b></div><div class="status">${esc(s.status||"")}</div>`;si.appendChild(c)});
+    inner.appendChild(sess);
+   });weeksEl.appendChild(week);
+  });
+  // Historial individual cronológico, independiente de la agrupación semanal.
+  filtered.forEach(s=>{let card=document.createElement("div");card.className="progress-item";card.innerHTML=`<div class="row"><strong>${esc(s.name)}</strong><span class="date">${new Date(s.date).toLocaleDateString("es-ES")}</span></div><div class="weight">${fmt(s.weight)} kg</div><div style="margin-top:5px">Series: <b>${esc(repsText(s.reps))}</b></div><div class="status">${esc(s.status||"")}</div><div class="toolbar"><button class="btn secondary small">Eliminar registro</button></div>`;card.querySelector("button").onclick=()=>{if(confirm("¿Eliminar esta sesión?")){data.sessions=data.sessions.filter(x=>x!==s);save();renderProgress()}};list.appendChild(card)});
+ }
+ render();root.querySelector("#search").oninput=e=>render(e.target.value);
  root.querySelector("#export").onclick=()=>{let blob=new Blob([JSON.stringify(data,null,2)],{type:"application/json"}),url=URL.createObjectURL(blob),a=document.createElement("a");a.href=url;a.download="gym-progress-backup.json";a.click();URL.revokeObjectURL(url)};
  root.querySelector("#importFile").onchange=async e=>{let f=e.target.files[0];if(!f)return;try{let parsed=JSON.parse(await f.text());if(!parsed.exercises||!parsed.sessions)throw 0;if(confirm("Importar reemplazará los datos actuales. ¿Continuar?")){data=parsed;save();renderTraining();renderProgress();toast("Copia importada")}}catch{alert("Archivo JSON no válido")}}
 }
